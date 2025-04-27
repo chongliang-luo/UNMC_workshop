@@ -1,0 +1,293 @@
+---
+title: "UNMC_workshop"
+output: html_document
+date: "2025-05-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T)
+require(data.table)
+require(table1)
+require(survival)
+require(ggplot2)
+```
+
+## About this tutorial
+
+This tutorial is a hands-on practice of using Privacy-preserving Distributed Algorithms (PDA) to run statistical analysis using data from multiple sites in a research network. The PDA framework includes algorithms for various statistical models, and this tutorial uses `ODAL`, `ODACH` and `DLMM` as examples. Throughout this tutorial we will use synthetic data that mimics the real data in the publications listed below. 
+
+-   ODAL (One-shot Distributed Algorithm for Logistic regression)
+  [Publication](https://doi.org/10.1093/jamia/ocz199)
+  
+-   ODACH (One-shot Distributed Algorithm for Cox regression with Heterogeneity)
+ [Publication](https://www.nature.com/articles/s41598-022-09069-0)
+
+-   DLMM (Distributed Linear Mixed-effects Model)
+  [Publication](https://www.nature.com/articles/s41467-022-29160-4)
+  
+The in-person attendees will be grouped into 4 teams (i.e. "sites" in a research network), namely the 4 University of Nebraska campuses (Medical Center, Lincoln, Omaha, and Kearney).  The teams will walk through the pda workflow and mimic real federated learning projects. The interactive data communication is conducted using the secure PDA-OTA (over-the-air, [Link](https://pda-ota.pdamethods.org/login)) cloud platform. For each team, please register ONE pda-ota account to be used for data communication. 
+
+ 
+## PDA-OTA project setup
+In the OTA platform...
+
+```{r, out.width='70%', fig.align='center', fig.cap='...', echo=F} 
+knitr::include_graphics('ota-registration.png')
+```
+
+
+ 
+## ODAL practice: fetal loss and medication use
+### A recap of the publication
+The ODAL (One-shot Distributed Algorithm for Logistic regression) method was published at JAMIA in 2020. ODAL effectively utilizes the information from the lead site (where the patient-level
+data are accessible) and incorporates the aggregate data (i.e. the first- and second-order gradients of the likelihood
+function) from other sites to construct an estimator without requiring iterative communication across sites
+or transferring patient-level data. ODAL was evaluated via simulation and a study on fetal loss and use of 100 medications with EHR data from the University of Pennsylvania Health System. The estimation accuracy was evaluated by comparing it with the gold standard estimator based on the pooled individual participant data (IPD).
+
+```{r, out.width='80%', fig.align='center', fig.cap='Duan 2020 JAMIA, Figure 5', echo=F} 
+knitr::include_graphics('ODAL_Fig5.png')
+```
+
+Among the 10 identified “harmful” drugs, 6 were category D or X (meaning have known evidence of increase fetal loss risk, based on the FDA's A-X category system), with 4 being known contraceptives. Three drugs were category
+C pain relievers. In the 10 medications that are “protective” of fetal loss, 8 are prenatal vitamins, as well as folic
+acid, that are commonly considered beneficial for pregnancy. In summary, the ODAL algorithms provide estimates that are
+highly consistent with the pooled estimates, and the identified associations are consistent with current understanding of these medications.
+
+
+### Data summary
+For simplicity of this practice, we will use a synthetic data of fetal loss `FetalLoss` and ONE category X medication `MedX`. Other risk factors include `Race`, `Age`, `Weight`, and `BMI`. The data are from 4 sites, e.g.`MedicalCenter`, `Lincoln`, `Omaha`, and `Kearney`. The data is summarized as below.
+
+
+```{r fetal_loss_data}
+fetal_loss = readRDS('/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/data/fetal_loss.rds')
+site.name = c('MedicalCenter', 'Lincoln', 'Omaha', 'Kearney')
+head(fetal_loss) 
+table1(~factor(FetalLoss)+factor(MedX)+Race+Age+Weight+BMI|site, fetal_loss)
+```
+
+We will use the logistic regression model to estimate the odds ratio (OR) of the risk factors on fetal loss. First, assume we have all the patients data pooled together, we can run a pooled logistic regression. This will give us gold-standard estimator.
+
+```{r, fetal_loss_pooled, echo=T}
+fit.pooled = glm(FetalLoss~MedX+Race+Age+Weight+BMI, family='binomial', data=fetal_loss)
+round(summary(fit.pooled)$coef, 3)
+bpool = round(summary(fit.pooled)$coef[,1], 4)
+sepool = round(summary(fit.pooled)$coef[,2], 4)
+# rbind(bpool, sepool)
+```
+
+Next, we look at another commonly used federated learning, i.e. fit logistic regression at each site, then average the estimators with inverse variances as weights. This is called the **meta**-estimator (as in a meta-analysis).
+```{r, fetal_loss_each, echo=T}
+# fetal_loss_split = split(fetal_loss, by='site')
+# px = length(bpool)
+K = length(site.name)
+bi = sei = c()  
+for(sid in site.name){
+  fit.i = glm(FetalLoss~MedX+Race+Age+Weight+BMI, family='binomial', data=fetal_loss[site==sid,])
+  cat(sid, '\n')
+  print(round(summary(fit.i)$coef, 3))
+  bi = cbind(bi, summary(fit.i)$coef[,1])
+  sei = cbind(sei, summary(fit.i)$coef[,2])
+} 
+```
+
+Notice that site `Kearney` has no Asian patients, thus the coefficient for Asian is not available. We manually set it as `NA` in order to obtain a valid meta-estimator.
+```{r, fetal_loss_meta, echo=T}
+bi[,4] = c(bi[1:3,4],NA,bi[4:7,4]) 
+sei[,4] = c(sei[1:3,4],NA,sei[4:7,4]) 
+bmeta = round(rowSums(bi/sei^2,na.rm=T)/rowSums(1/sei^2,na.rm=T), 4)
+semeta = round(sqrt(1/rowSums(1/sei^2,na.rm=T)), 4)
+```
+
+The meta-estimator is biased to the pooled estimator.
+```{r, fetal_loss_pooled_meta, echo=T}
+cbind(bpool, bmeta) 
+```
+
+### ODAL workflow
+We now use ODAL to conduct a federated logistic regression. ODAL combined the IPD from the lead site and AD from the collaborating sites. We assume `MedicalCenter` is the **lead** site and the other 3 sites (`Lincoln`, `Omaha`, `Kearney`) are the collaborating sites. The diagram below demonstrate the ODAL workflow.
+
+```{r, out.width='90%', fig.align='center', fig.cap='...', echo=F}
+# knitr::include_graphics('images/hex-rmarkdown.png')
+knitr::include_graphics('https://github.com/Penncil/pda/blob/master/Picture1.png?raw=true')
+```
+
+The ODAL workflow starts with setting up a `control` file for coordinating all the calculation and data communication between sites.  This `control` file should be decided by all the sites.
+ 
+```{r odal_control}
+control <- list(project_name = 'Medication use and fetal loss (ODAL)',
+                sites = c('MedicalCenter', 'Lincoln', 'Omaha', 'Kearney'),
+                lead_site = 'MedicalCenter', 
+                step = 'initialize',
+                model = 'ODAL',
+                family = 'binomial',
+                heterogeneity = FALSE,
+                outcome = 'FetalLoss',
+                variables = c('MedX', 'Race', 'Age', 'Weight', 'BMI'),
+                variables_lev = list(Race=c('White', 'Black', 'Asian', 'Other')),
+                init_method = "meta",   
+                optim_maxit = 100,
+                optim_method = 'BFGS',
+                upload_date = as.character(Sys.time()) )
+
+fetal_loss_split = split(fetal_loss,by='site')
+```
+
+The lead site upload the `control` file in the pda-ota cloud.
+```{odal_control}
+pda(site_id = 'site1', control=control, dir=getwd() )
+```
+
+Then each collaborating sites can execute the `initialize` step by calculating AD using their own IPD. They can review the AD before sending it out to the cloud.
+```{odal_initialize}
+pda(site_id = 'site1', ipdata = fetal_loss_split[[1]], dir=getwd() )
+```
+
+After all collaborating sites completed the `initialize` step, the lead site can proceed to the `derive` step, by setting the initial estimate `beta_init` as the meta estimate (i.e. inverse-variance weighted average) in the `control` file. 
+```{odal_initialize}
+pda(site_id = 'site1', ipdata = fetal_loss_split[[1]], dir=getwd() )
+```
+
+Then each collaborating sites can execute the `derive` step by calculating AD using their own IPD. They can review the AD before sending it out to the cloud.
+```{odal_initialize}
+pda(site_id = 'site3', ipdata = fetal_loss_split[[3]], dir=getwd() )
+```
+
+After all collaborating sites completed the `derive` step, the lead site can proceed to the `estimate` step, by constructing the surrogate likelihood and obtaining the ODAL estimate `btilde` and  `setilde`. 
+```{odal_initialize}
+pda(site_id = 'site1', ipdata = fetal_loss_split[[1]], dir=getwd() )
+```
+
+The PDA-ODAL is now completed. We can stop now, or we can optionally proceed to the `es` step and allow each collaborating site to calculating their own ODAL estimate by using their own IPD to construct the surrogate likelihood.
+```{odal_initialize}
+pda(site_id = 'site2', ipdata = fetal_loss_split[[2]], dir=getwd() )
+```
+
+Now let's compare the ODAL estimate with pooled and meta-estimates.
+```{r CI_plot, out.width='120%',  echo = F, warning = F}
+# hide this plot in the tutorial? show it during the workshop run
+# make some plots here
+source("~/Dropbox/PDA-git/pda/R/ODAL.R")
+source("~/Dropbox/PDA-git/pda/R/pda.R")
+source("/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/pda_wrapper.R")
+res = run_ODAL_with_pda(control, mydir=getwd(), fetal_loss_split, upload_without_confirm=T, silent_message=T)
+
+Xname = c("MedX", "RaceBlack", 'RaceAsian', 'RaceOther', "Age", "Weight", "BMI")
+px = length(Xname)
+methods <- c('pooled', 'meta', 'ODAL')   
+nm <- length(methods)
+ci.df <- data.frame(method = rep(methods, each=px),       
+                    risk.factor= rep(Xname, nm),
+                    beta=as.numeric(c(bpool[-1], bmeta[-1], res$btilde[-1])),  
+                    sd=as.numeric(c(sepool[-1], semeta[-1], res$setilde[-1])),          
+                    goldstandard=as.numeric(rep(bpool[-1], nm)))
+ci.df$method <- factor(ci.df$method, levels = rev(methods)) 
+ci.df$risk.factor <- factor(ci.df$risk.factor, levels = Xname)  
+case = 'Fetal loss study'
+
+ggplot(ci.df, aes(x=method, y=beta, shape=method,color=method, group=risk.factor)) +
+geom_errorbar(aes(ymin=beta-1.96*sd, ymax=beta+1.96*sd), width=0.1) +
+geom_line() +
+geom_hline(aes(yintercept=goldstandard), linetype = "dashed") +
+geom_point(size=1.5) + 
+facet_wrap(. ~ risk.factor
+           , scales= "free"  #  "fixed" # 
+           , ncol=3)+
+labs(title= case, # case, # paste0(case,', 95% confidence intervals of effect size estimates'),
+     x =  '', y = "Effect size (log odds ratio)" ) +
+theme_bw() +
+theme(plot.title = element_text(hjust = 0.5)
+      , axis.ticks.x = element_blank()
+      , strip.text.x = element_text(size = 14)
+      , panel.grid.major = element_blank()
+      # , panel.grid.minor = element_blank()
+      , axis.title.y = element_text(size=9)
+      , axis.text.x = element_text(size=9)
+      , axis.text.y = element_text(size=9)
+      # , panel.border = element_rect()
+      # , axis.text.x = element_blank()
+      # , axis.text.x = element_text(angle=30, hjust=1)
+      , legend.position = c(0.7, 0.13)
+      , legend.title = element_blank()
+      # , legend.direction = "horizontal"
+      # , legend.key = element_rect(size=0.05)
+      # , legend.key.size= unit(3, "line")
+      # , legend.key = element_rect(size=9)
+      , legend.text=element_text(size=15)
+      # , legend.key.width = unit(0.05, "line")
+      , legend.key.height = unit(1.5, "line")
+) + coord_flip()
+
+```
+
+ 
+
+
+## ODACH practice: opioid use disorder
+### A recap of the publication
+The ODACH (One-shot Distributed Algorithm for Cox regression with Heterogeneity) method was published at Scientific Report in 2022. ODACH  
+
+ 
+ 
+
+
+### Data summary
+For simplicity of this practice, we will use a synthetic data of fetal loss `FetalLoss` and ONE category X medication `MedX`. Other risk factors include `Race`, `Age`, `Weight`, and `BMI`. The data are from 4 sites, e.g.`MedicalCenter`, `Lincoln`, `Omaha`, and `Kearney`. The data is summarized as below.
+
+
+```{r OUD_data}
+fetal_loss = readRDS('/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/data/fetal_loss.rds')
+site.name = c('MedicalCenter', 'Lincoln', 'Omaha', 'Kearney')
+head(fetal_loss) 
+table1(~factor(FetalLoss)+factor(MedX)+Race+Age+Weight+BMI|site, fetal_loss)
+```
+
+We will use the Cox proportional hazards regression model to estimate the hazard ratio (HR) of the risk factors on OUD. Cox PH regression is the most commonly used model for time-to-event outcome. And when dealing with data from multiple sites, Cox regression stratified by sites may be more flexible as it allows the baseline hazard functions to be different across sites. First, assume we have all the patients data pooled together and run a pooled Cox regression stratified by sites. This will give us the gold-standard estimator.
+
+```{r, OUD_pooled, echo=T}
+fit.pooled = glm(FetalLoss~MedX+Race+Age+Weight+BMI, family='binomial', data=fetal_loss)
+round(summary(fit.pooled)$coef, 3)
+bpool = round(summary(fit.pooled)$coef[,1], 4)
+sepool = round(summary(fit.pooled)$coef[,2], 4) 
+```
+
+Next, we look at the **meta**-estimator (as in a meta-analysis).
+```{r, OUD_each, echo=T}
+# fetal_loss_split = split(fetal_loss, by='site')
+# px = length(bpool)
+K = length(site.name)
+bi = sei = c()  
+for(sid in site.name){
+  fit.i = glm(FetalLoss~MedX+Race+Age+Weight+BMI, family='binomial', data=fetal_loss[site==sid,])
+  cat(sid, '\n')
+  print(round(summary(fit.i)$coef, 3))
+  bi = cbind(bi, summary(fit.i)$coef[,1])
+  sei = cbind(sei, summary(fit.i)$coef[,2])
+} 
+```
+
+Notice that site `Kearney` has no Asian patients, thus the coefficient for Asian is not available. We manually set it as `NA` in order to obtain a valid meta-estimator.
+```{r, OUD_meta, echo=T}
+bi[,4] = c(bi[1:3,4],NA,bi[4:7,4]) 
+sei[,4] = c(sei[1:3,4],NA,sei[4:7,4]) 
+bmeta = round(rowSums(bi/sei^2,na.rm=T)/rowSums(1/sei^2,na.rm=T), 4)
+semeta = round(sqrt(1/rowSums(1/sei^2,na.rm=T)), 4)
+```
+
+The meta-estimator is biased to the pooled estimator.
+```{r, OUD_pooled_meta, echo=T}
+cbind(bpool, bmeta) 
+```
+
+### ODACH workflow
+
+
+## DLMM practice: COVID-19 hospitalization length of stay
+### A recap of the publication
+
+### Data summary
+
+### ODACH workflow
+
+- Duan R, Boland MR, Liu Z, Liu Y, Chang HH, Xu H, Chu H, Schmid CH, Forrest CB, Holmes JH, Schuemie MJ, Berlin JA, Moore JH, Chen Y. Learning from electronic health records across multiple sites: A communication-efficient and privacy-preserving distributed algorithm. J Am Med Inform Assoc. 2020 Mar 1;27(3):376-385. doi: 10.1093/jamia/ocz199. PMID: 31816040; PMCID: PMC7025371. 
+- Luo C, Duan R, Naj AC, Kranzler HR, Bian J, Chen Y. ODACH: a one-shot distributed algorithm for Cox model with heterogeneous multi-center data. Sci Rep. 2022 Apr 22;12(1):6627. doi: 10.1038/s41598-022-09069-0. PMID: 35459767; PMCID: PMC9033863. 
+- Luo C, Islam MN, Sheils NE, Buresh J, Reps J, Schuemie MJ, Ryan PB, Edmondson M, Duan R, Tong J, Marks-Anglin A, Bian J, Chen Z, Duarte-Salles T, Fernández-Bertolín S, Falconer T, Kim C, Park RW, Pfohl SR, Shah NH, Williams AE, Xu H, Zhou Y, Lautenbach E, Doshi JA, Werner RM, Asch DA, Chen Y. DLMM as a lossless one-shot algorithm for collaborative multi-site distributed linear mixed models. Nat Commun. 2022 Mar 30;13(1):1678. doi: 10.1038/s41467-022-29160-4. PMID: 35354802; PMCID: PMC8967932.
