@@ -12,36 +12,45 @@ require(pda)
 
 ############################## Setup ##############################
 ## local directory
-setwd('/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/run_examples/test') # my working dir
+setwd('UNMC_workshop/run_examples/test/') # my working dir
 mydir = 'test_DLMM'       # my DLMM working dir 
 dir.create('test_DLMM')   # create DLMM working dir
 mysite = 'Kearney'        # my site name
 
-## read in my data 
-url_mydata = paste0('https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/COVID_LOS_', mysite, '.rds') # github repo
-COVID_LOS_mydata = readRDS(gzcon(url(url_mydata)))    # read in my data from github repo
-
-# fread(gzcon(url(url_mydata)))
-
+## read in pooled data 
+url_mydata = 'https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/COVID_LOS.rds' # github repo
+COVID_LOS = readRDS(gzcon(url(url_mydata)))    # read in my data from github repo
 ########################### END: Setup ##############################
+
 
 ############################ Data summary ###########################
 ## descriptive
-head(COVID_LOS_mydata)   
+head(COVID_LOS)   
 table1(~LOS+Age+CCI+Gender+Admission+factor(Cancer)+factor(COPD)+factor(Hyperlipidemia)+factor(Hypertension)+
-         factor(KidneyDisease)+factor(Obesity)+factor(HeartDisease)+factor(Diabetes), data=COVID_LOS_mydata)
+         factor(KidneyDisease)+factor(Obesity)+factor(HeartDisease)+factor(Diabetes)|site, data=COVID_LOS)
 
-## let's fit a linear regression model using my data
-fit.i = lm(LOS ~ Age + CCI + Gender + Admission + Cancer + COPD + Hyperlipidemia + Hypertension +
-             KidneyDisease + Obesity + HeartDisease + Diabetes, data = COVID_LOS_mydata)
-round(summary(fit.i)$coef, 3)
+site.name = c('MedicalCenter', 'Lincoln', 'Omaha', 'Kearney')
+## let's fit a linear regression model at each site
+bi = sei = c()  
+for(sid in site.name){
+  fit.i = lm(LOS~Age+CCI+Gender+Admission+Cancer+COPD+Hyperlipidemia+Hypertension+
+               KidneyDisease + Obesity + HeartDisease + Diabetes, data=COVID_LOS[site==sid,])
+  cat(sid, '\n')
+  print(round(summary(fit.i)$coef, 3))
+  bi = cbind(bi, summary(fit.i)$coef[,1])
+  sei = cbind(sei, summary(fit.i)$coef[,2])
+}
+bmeta = round(rowSums(bi/sei^2,na.rm=T)/rowSums(1/sei^2,na.rm=T), 3)
+semeta = round(sqrt(1/rowSums(1/sei^2,na.rm=T)), 3)
 
 ## Discussion...
 ######################### END: Data summary ###########################
 
-####################### DLMM workflow ##################################
+ 
+####################### DLMM workflow ################################## 
+## split pooled data by sites
+COVID_LOS_split = split(COVID_LOS, by='site') 
 ## setup control
-site.name = c('MedicalCenter', 'Lincoln', 'Omaha', 'Kearney')
 control <- list(project_name = 'COVID hospitalization length of stay (DLMM)',
                 sites = c('MedicalCenter', 'Lincoln', 'Omaha', 'Kearney'),
                 lead_site = 'MedicalCenter', 
@@ -58,37 +67,36 @@ control <- list(project_name = 'COVID hospitalization length of stay (DLMM)',
                 variables_heterogeneity = c('Intercept'),
                 optim_maxit = 100,
                 upload_date = as.character(Sys.time()) )
-
-## interactive section:
-# [all sites]: remove any json files if exist
-file.remove(list.files(mydir,full.names = T)[grepl('.json', list.files(mydir))])
 K = length(control$sites)
+px = length(bpool) 
+
+# remove any json files if exist
+file.remove(list.files(mydir,full.names = T)[grepl('.json', list.files(mydir))])
 
 # [lead site]: create control.json, 
 pda(site_id = control$lead_site, control=control, dir=mydir)
-# and upload it to pda-ota 
 
-# [all sites]: download the control file, calculate AD,  
-pda(site_id = mysite, ipdata = COVID_LOS_mydata, dir=mydir)
-# and upload it to pda-ota
+# [all sites]: calculate AD, 
+for(sid in K:1) pda(site_id = control$sites[sid], ipdata = COVID_LOS_split[[sid]], dir=mydir, 
+                    upload_without_confirm =T, silent_message=T)
 
-# [any site]: download AD files (_initialize.json), fit DLMM  
-pda(site_id = mysite, dir=mydir, ipdata = COVID_LOS_mydata)
-## END interactive section 
+# [any site]: use AD files to fit DLMM
+pda(site_id = control$lead_site, dir=mydir, ipdata = COVID_LOS_split[[control$lead_site]], 
+    upload_without_confirm =T, silent_message=T)
 
 
 ## OK pda-DLMM is completed now, let's check the results
 # read in the DLMM results
-config <- getCloudConfig(site_id=mysite, dir=mydir)
+config <- getCloudConfig(site_id =control$lead_site, dir=mydir)
 fit.dlmm <- pdaGet(name = paste0(control$lead_site,'_estimate'), config = config)
-fit.dlmm
+
 
 # fixed effects
 data.frame(risk_factor=fit.dlmm$risk_factor, b_dlmm=fit.dlmm$bhat, se_dlmm=fit.dlmm$sebhat)
 
 # var component (of random intercepts)
 data.frame(RandomEffect=c(fit.dlmm$risk_factor_heterogeneity,  'random error'),
-            VarComp=c(fit.dlmm$Vhat, fit.dlmm$sigmahat^2) )
+           VarComp=c(fit.dlmm$Vhat, fit.dlmm$sigmahat^2) )
 
 # random intercepts (BLUP)
 data.frame(site = control$sites, BLUP.dlmm = c(fit.dlmm$uhat))
@@ -101,7 +109,7 @@ data.frame(site = control$sites, BLUP.dlmm = c(fit.dlmm$uhat))
 control$variables_heterogeneity = c('Intercept', 'Gender')
 control$step = 'estimate'
 pdaPut(obj=control, name='control', config=config)
-pda(site_id = mysite, dir=mydir, ipdata = COVID_LOS_mydata)
+pda(site_id = mysite, dir=mydir, ipdata = COVID_LOS_split[[control$lead_site]])
 
 
 ## Let's check the results 
@@ -126,12 +134,12 @@ data.frame(site = control$sites,
 
 
 
+
+
+
+
+
 ########################## LMM Pooled data ############################
-## read in pooled data 
-url_mydata = 'https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/COVID_LOS.rds' # github repo
-COVID_LOS = readRDS(gzcon(url(url_mydata)))     
-
-
 ## LMM, random intercepts
 fit.pooled <- lme4::lmer(LOS~Age+CCI+Gender+Admission+Cancer+COPD+Hyperlipidemia+Hypertension+
                            KidneyDisease + Obesity + HeartDisease + Diabetes +
@@ -183,3 +191,5 @@ data.frame(site = control$sites,
            BLUP.dlmm.GenderM = fit.dlmm1$uhat[,2])
 
 ####################### END: LMM Pooled data ############################
+
+
