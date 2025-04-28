@@ -17,9 +17,13 @@ mydir = 'test_DLMM'       # my DLMM working dir
 dir.create('test_DLMM')   # create DLMM working dir
 mysite = 'Kearney'        # my site name
 
-## read in pooled data 
-url_mydata = 'https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/COVID_LOS.rds' # github repo
-COVID_LOS = readRDS(gzcon(url(url_mydata)))    # read in my data from github repo
+## read in pooled csv data 
+# url_mydata = 'https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/COVID_LOS.rds' # github repo
+# COVID_LOS = readRDS(gzcon(url(url_mydata)))    # read in my data from github repo
+
+url_mydata = 'https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/COVID_LOS.csv'  # github repo
+COVID_LOS = fread( url_mydata )
+
 ########################### END: Setup ##############################
 
 

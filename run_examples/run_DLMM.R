@@ -12,16 +12,17 @@ require(pda)
 
 ############################## Setup ##############################
 ## local directory
-setwd('/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/run_examples/test') # my working dir
-mydir = 'test_DLMM'       # my DLMM working dir 
-dir.create('test_DLMM')   # create DLMM working dir
+setwd('/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/run_examples/cloud') # my working dir
+mydir = 'COVID_LOS_DLMM'       # my DLMM working dir 
+dir.create(mydir)   # create DLMM working dir
 mysite = 'Kearney'        # my site name
 
-## read in my data 
-url_mydata = paste0('https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/COVID_LOS_', mysite, '.rds') # github repo
-COVID_LOS_mydata = readRDS(gzcon(url(url_mydata)))    # read in my data from github repo
+## read in my csv data 
+# url_mydata = paste0('https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/COVID_LOS_', mysite, '.rds') # github repo
+# COVID_LOS_mydata = readRDS(gzcon(url(url_mydata)))    # read in my data from github repo
 
-# fread(gzcon(url(url_mydata)))
+url_mydata = paste0('https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/COVID_LOS_', mysite, '.csv') # github repo
+COVID_LOS_mydata = fread( url_mydata )
 
 ########################### END: Setup ##############################
 
