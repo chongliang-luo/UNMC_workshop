@@ -1,15 +1,15 @@
 
 # pda_wrapper: ODAL
 
-source("~/Dropbox/PDA-git/pda/R/ODAL.R")
-
-Rcpp::sourceCpp("/Users/chongliang/Dropbox/PDA-git/pda/src/rcpp_coxph.cpp")
-source("/Users/chongliang/Dropbox/PDA-git/pda/R/ODAC.R")
-
-source("/Users/chongliang/Dropbox/PDA-git/pda/R/dlmm.R")
-source("/Users/chongliang/Dropbox/PDA-git/pda/R/DLM.R")
-
-source("~/Dropbox/PDA-git/pda/R/pda.R")
+# source("~/Dropbox/PDA-git/pda/R/ODAL.R")
+# 
+# Rcpp::sourceCpp("/Users/chongliang/Dropbox/PDA-git/pda/src/rcpp_coxph.cpp")
+# source("/Users/chongliang/Dropbox/PDA-git/pda/R/ODAC.R")
+# 
+# source("/Users/chongliang/Dropbox/PDA-git/pda/R/dlmm.R")
+# source("/Users/chongliang/Dropbox/PDA-git/pda/R/DLM.R")
+# 
+# source("~/Dropbox/PDA-git/pda/R/pda.R")
 
 ## run ODACH or ODACH_CC with pda silently at local 
 run_ODAL_with_pda <- function(control, mydir, mydata, upload_without_confirm=T, silent_message=T){
