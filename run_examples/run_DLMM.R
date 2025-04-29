@@ -2,8 +2,7 @@
 # rm(list=ls())
 
 require(data.table)
-require(table1)
-# require(survival)
+require(table1) 
 require(ggplot2)
 require(lme4)
 require(remotes)
@@ -60,7 +59,7 @@ control <- list(project_name = 'COVID hospitalization length of stay (DLMM)',
                 optim_maxit = 100,
                 upload_date = as.character(Sys.time()) )
 
-## interactive section:
+## DLMM interactive section: use pda-ota for data communication
 # [all sites]: remove any json files if exist
 file.remove(list.files(mydir,full.names = T)[grepl('.json', list.files(mydir))])
 K = length(control$sites)
@@ -75,7 +74,7 @@ pda(site_id = mysite, ipdata = COVID_LOS_mydata, dir=mydir)
 
 # [any site]: download AD files (_initialize.json), fit DLMM  
 pda(site_id = mysite, dir=mydir, ipdata = COVID_LOS_mydata)
-## END interactive section 
+## END DLMM interactive section 
 
 
 ## OK pda-DLMM is completed now, let's check the results

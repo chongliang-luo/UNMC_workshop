@@ -2,8 +2,7 @@
 # rm(list=ls())
 
 require(data.table)
-require(table1)
-# require(survival)
+require(table1) 
 require(ggplot2)
 require(lme4)
 require(remotes)
@@ -74,6 +73,7 @@ control <- list(project_name = 'COVID hospitalization length of stay (DLMM)',
 K = length(control$sites)
 px = length(bpool) 
 
+## DLMM non-interactive section: data communication at local computer
 # remove any json files if exist
 file.remove(list.files(mydir,full.names = T)[grepl('.json', list.files(mydir))])
 
