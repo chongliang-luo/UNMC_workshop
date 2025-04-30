@@ -26,3 +26,6 @@ source('https://github.com/Penncil/pda/raw/master/R/dlmm.R')
 source('https://github.com/Penncil/pda/raw/master/R/ODAL.R')
 ```
  
+
+5. Canva link:
+- https://www.canva.com/design/DAGmCSLiuC0/t-eUoSnoqJ7I8U3a6-pcXw/edit?utm_content=DAGmCSLiuC0&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton
