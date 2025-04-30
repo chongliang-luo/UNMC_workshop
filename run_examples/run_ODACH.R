@@ -19,7 +19,7 @@ install_github('https://github.com/Penncil/pda')
 require(pda)
 
 ## local directory
-setwd('/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/run_examples/cloud') # my working dir
+setwd('/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/run_examples/ota_cloud') # my working dir
 mydir = 'OUD_ODACH'       # my project working dir 
 dir.create(mydir)         # create project working dir
 mysite = 'Kearney'        # my site name 'MedicalCenter', 'Lincoln', 'Omaha', 'Kearney'
