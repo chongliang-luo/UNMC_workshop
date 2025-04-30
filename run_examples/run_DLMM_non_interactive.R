@@ -1,6 +1,13 @@
+################################################################################
+################   UNMC workshop: PDA-OTA practice #1 DLMM  ####################
+################################################################################
 
-# rm(list=ls())
 
+
+############################## Setup ##############################
+# rm(list=ls()) # empty R， remove all objects
+
+## install packages
 require(data.table)
 require(table1) 
 require(ggplot2)
@@ -9,12 +16,12 @@ require(remotes)
 install_github('https://github.com/Penncil/pda')
 require(pda)
 
-############################## Setup ##############################
+
 ## local directory
-setwd('UNMC_workshop/run_examples/test/') # my working dir
-mydir = 'test_DLMM'       # my DLMM working dir 
-dir.create('test_DLMM')   # create DLMM working dir
-mysite = 'Kearney'        # my site name
+setwd('/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/run_examples/cloud') # my working dir
+mydir = 'COVID_LOS_DLMM'       # my project working dir 
+dir.create('COVID_LOS_DLMM')   # create project working dir
+mysite = 'MedicalCenter'       # my site name 'MedicalCenter', 'Lincoln', 'Omaha', 'Kearney'
 
 ## read in pooled csv data 
 # url_mydata = 'https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/COVID_LOS.rds' # github repo

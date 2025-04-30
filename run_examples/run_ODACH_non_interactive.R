@@ -1,6 +1,14 @@
+################################################################################
+################   UNMC workshop: PDA-OTA practice #3 ODACH  ###################
+################################################################################
 
-# rm(list=ls())
 
+
+
+############################## Setup ##############################
+# rm(list=ls()) # empty R， remove all objects
+
+## install packages
 require(data.table)
 require(table1)
 require(survival)
@@ -11,12 +19,11 @@ install_github('https://github.com/Penncil/pda')
 require(pda)
 
 
-############################## Setup ##############################
 ## local directory
 setwd('/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/run_examples/cloud') # my working dir
-mydir = 'OUD_ODACH'       # my DLMM working dir 
-dir.create(mydir)   # create DLMM working dir
-mysite = 'Kearney'        # my site name
+mydir = 'OUD_ODACH'       # my project working dir 
+dir.create(mydir)         # create project working dir
+mysite = 'Kearney'        # my site name 'MedicalCenter', 'Lincoln', 'Omaha', 'Kearney'
 
 ## read in my csv data 
 # url_mydata = paste0('https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/OUD_', mysite, '.rds') # github repo
@@ -32,8 +39,9 @@ OUD = fread( url_mydata )
 head(OUD)   
 table1(~time +factor(status) +factor(age_65) +factor(gender_M) +factor(race_NHW) +
          factor(smoking) +CCI+factor(depression) +factor(pain)|site, data=OUD)
-
 site.name = c('MedicalCenter', 'Lincoln', 'Omaha', 'Kearney')
+K = length(site.name)
+
 ## let's fit a Cox regression model at each site
 bi = sei = c()  
 for(sid in site.name){
@@ -74,51 +82,38 @@ control <- list(project_name = 'Opioid use disorder (ODACH)',
                 optim_method = 'BFGS',
                 upload_date = as.character(Sys.time()) )
 OUD_split = split(OUD, by='site')
-K = length(site.name)
+ 
 
 ## ODACH non-interactive section: data communication at local computer
 # remove any json files if exist
 file.remove(list.files(mydir,full.names = T)[grepl('.json', list.files(mydir))])
 
 # [lead site]: create control.json,
-pda(site_id = control$lead_site, control = control, dir = mydir,
-    upload_without_confirm =T, silent_message=T)
+pda(site_id = control$lead_site, control = control, dir = mydir)
 
 # [all sites]: initialize step, calculate individual estimates, 
-for(sid in K:1) pda(site_id = control$sites[sid], ipdata = OUD_split[[sid]], dir=mydir, 
+for(sid in site.name) pda(site_id = sid, ipdata = OUD_split[[sid]], dir=mydir, 
                     upload_without_confirm =T, silent_message=T)
 
 # [all sites]: derive step, calculate derivatives, 
-for(sid in K:1) pda(site_id = control$sites[sid], ipdata = OUD_split[[sid]], dir=mydir, 
+for(sid in site.name) pda(site_id = sid, ipdata = OUD_split[[sid]], dir=mydir, 
                     upload_without_confirm =T, silent_message=T)
 
 # [lead site]: estimate step, calculate ODACH estimate,  
 pda(site_id = control$lead_site, dir=mydir, ipdata = OUD_split[[control$lead_site]],
     upload_without_confirm =T, silent_message=T)
+
+
+## OK pda-ODACH is completed now, let's check the results
+# read in the ODACH results
 config <- getCloudConfig(site_id =control$lead_site, dir=mydir)
 fit.odach <- pdaGet(paste0(control$lead_site,'_estimate'), config = config)
 
+##################### END: ODACH workflow #################################
 
-# # each site run ODACH estimate and then synthesize them, optional
-# pda(site_id = site.name[2], dir=mydir, ipdata = OUD_split[[2]],
-#     upload_without_confirm =T, silent_message=T)
-# 
-# pda(site_id = site.name[3], dir=mydir, ipdata = OUD_split[[3]],
-#     upload_without_confirm =T, silent_message=T)
-# 
-# pda(site_id = site.name[4], dir=mydir, ipdata = OUD_split[[4]],
-#     upload_without_confirm =T, silent_message=T)
-# 
-# pda(site_id = control$lead_site, dir=mydir, ipdata = OUD_split[[control$lead_site]],
-#     upload_without_confirm =T, silent_message=T)
-# 
-# fit.odach <- pdaGet(paste0(site.name[4],'_estimate'), config = config)
-# fit.odach <- pdaGet(paste0(control$lead_site,'_synthesize'), config = config)
   
-  
-  
-  
-  
+########################## Cox reg Pooled data ############################
+
 ## make CI plot
 Xname = c("Age 65+", "Gender male", "Race NHW", "Smoking", "CCI", "Depression", "Pain")
 px = length(Xname)
@@ -133,6 +128,7 @@ ci.df$method <- factor(ci.df$method, levels = rev(methods))
 ci.df$risk.factor <- factor(ci.df$risk.factor, levels = Xname)  
 case = 'Opioid use disorder study'
 
+CI_plot_OUD_ODACH = 
 ggplot(ci.df, aes(x=method, y=beta, shape=method,color=method, group=risk.factor)) +
   geom_errorbar(aes(ymin=beta-1.96*sd, ymax=beta+1.96*sd), width=0.1) +
   geom_line() +
@@ -156,4 +152,8 @@ ggplot(ci.df, aes(x=method, y=beta, shape=method,color=method, group=risk.factor
         , legend.text=element_text(size=15) 
         , legend.key.height = unit(1.5, "line")
   ) + coord_flip()
- 
+
+ggsave("CI_plot_OUD_ODACH.pdf",  plot = CI_plot_OUD_ODACH, width =10, height =8)
+
+####################### END: Cox reg Pooled data ###########################
+

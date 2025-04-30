@@ -1,6 +1,14 @@
+################################################################################
+################   UNMC workshop: PDA-OTA practice #3 ODACH  ###################
+################################################################################
 
-# rm(list=ls())
 
+
+
+############################## Setup ##############################
+# rm(list=ls()) # empty R， remove all objects
+
+## install packages
 require(data.table)
 require(table1)
 require(survival)
@@ -10,13 +18,11 @@ require(remotes)
 install_github('https://github.com/Penncil/pda')
 require(pda)
 
-
-############################## Setup ##############################
 ## local directory
 setwd('/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/run_examples/cloud') # my working dir
-mydir = 'OUD_ODACH'       # my DLMM working dir 
-dir.create(mydir)         # create DLMM working dir
-mysite = 'Kearney'        # my site name
+mydir = 'OUD_ODACH'       # my project working dir 
+dir.create(mydir)         # create project working dir
+mysite = 'Kearney'        # my site name 'MedicalCenter', 'Lincoln', 'Omaha', 'Kearney'
 
 ## read in my csv data  
 url_mydata = paste0('https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/OUD_', mysite, '.csv') # github repo
@@ -29,6 +35,8 @@ OUD_mydata = fread( url_mydata )
 head(OUD_mydata)   
 table1(~time +factor(status) +factor(age_65) +factor(gender_M) +factor(race_NHW) +
          factor(smoking) +CCI+factor(depression) +factor(pain)|site, data=OUD_mydata)
+site.name = c('MedicalCenter', 'Lincoln', 'Omaha', 'Kearney')
+K = length(site.name)
 
 ## let's fit a Cox regression model using my data
 fit.i = coxph(Surv(time, status)~age_65+gender_M+race_NHW+smoking+CCI+depression+pain, data=OUD_mydata)
@@ -101,7 +109,7 @@ bpool = round(summary(fit.pooled)$coef[,1], 4)
 sepool = round(summary(fit.pooled)$coef[,3], 4)
 
 
-## Cox regression at each site, then meta 
+## Cox regression at each site, then average them with inverse-variance as weights. This is called "meta-estimator" 
 bi = sei = c()  
 for(sid in site.name){
   fit.i = coxph(Surv(time, status)~age_65+gender_M+race_NHW+smoking+CCI+depression+pain, data=OUD[site==sid,])
@@ -112,7 +120,6 @@ for(sid in site.name){
 } 
 bmeta = round(rowSums(bi/sei^2,na.rm=T)/rowSums(1/sei^2,na.rm=T), 4)
 semeta = round(sqrt(1/rowSums(1/sei^2,na.rm=T)), 4)
-cbind(bpool, bmeta) 
 
 
 
@@ -130,6 +137,7 @@ ci.df$method <- factor(ci.df$method, levels = rev(methods))
 ci.df$risk.factor <- factor(ci.df$risk.factor, levels = Xname)  
 case = 'Opioid use disorder study'
 
+CI_plot_OUD_ODACH = 
 ggplot(ci.df, aes(x=method, y=beta, shape=method,color=method, group=risk.factor)) +
   geom_errorbar(aes(ymin=beta-1.96*sd, ymax=beta+1.96*sd), width=0.1) +
   geom_line() +
@@ -153,6 +161,8 @@ ggplot(ci.df, aes(x=method, y=beta, shape=method,color=method, group=risk.factor
         , legend.key.height = unit(1.5, "line")
   ) + coord_flip()
  
+ggsave("CI_plot_OUD_ODACH.pdf",  plot = CI_plot_OUD_ODACH, width =10, height =8)
+
 ####################### END: Cox reg Pooled data ###########################
  
 
