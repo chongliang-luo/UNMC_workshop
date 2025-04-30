@@ -9,32 +9,33 @@
 ## install packages
 require(data.table)
 require(table1) 
-require(ggplot2)
-require(remotes)
-install_github('https://github.com/Penncil/pda')
-require(pda)
+require(ggplot2) 
+
+source('https://github.com/Penncil/pda/raw/master/R/pda.R')
+source('https://github.com/Penncil/pda/raw/master/R/DLM.R')
+source('https://github.com/Penncil/pda/raw/master/R/dlmm.R')
+source('https://github.com/Penncil/pda/raw/master/R/ODAL.R')
 
 
-## local directory
-setwd('/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/run_examples/ota_cloud') # my working dir
+
+
+## local working directory
+setwd('/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/run_examples/ota_cloud') # CHANGE THIS TO YOUR DIR
 mydir = 'fetal_loss_ODAL'     # my project working dir 
 dir.create(mydir)             # create project working dir
-mysite = 'MedicalCenter'      # my site name 'MedicalCenter', 'Lincoln', 'Omaha', 'Kearney'
+mysite = 'MedicalCenter'      # CHANGE THIS TO YOUR SITE # 'MedicalCenter', 'Lincoln', 'Omaha', 'Kearney'
 
-## read in  csv data file 
-# url_mydata = paste0('https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/fetal_loss_', mysite, '.rds') # github repo
-# COVID_LOS_mydata = readRDS(gzcon(url(url_mydata)))    # read in my data from github repo
+## read in RDS data file 
+url_mydata = 'https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/fetal_loss.rds' # github repo
+fetal_loss = readRDS(gzcon(url(url_mydata)))    # read in my data from github repo
 
-url_mydata = 'https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/fetal_loss.csv' # github repo
-fetal_loss = fread( url_mydata )
-fetal_loss[,Race:=factor(Race, levels = c('White', 'Black', 'Asian', 'Other'))]
 ########################### END: Setup ##############################
 
 
 
 ############################ Data summary ###########################
 ## descriptive
-head(fetal_loss)   
+fetal_loss   
 table1(~factor(FetalLoss)+factor(MedX)+Race+Age+Weight+BMI|site, fetal_loss )
 site.name = c('MedicalCenter', 'Lincoln', 'Omaha', 'Kearney')
 K = length(site.name)
@@ -52,7 +53,8 @@ for(sid in site.name){
 bi[,4] = c(bi[1:3,4],NA,bi[4:7,4]) 
 sei[,4] = c(sei[1:3,4],NA,sei[4:7,4]) 
 
-## Average them with inverse-variance as weights. This is called "meta-estimator" 
+## Average them with inverse-variance as weights. 
+# This is called "meta-estimator", we may also use this as a convenient federated analysis
 bmeta = round(rowSums(bi/sei^2,na.rm=T)/rowSums(1/sei^2,na.rm=T), 4)
 semeta = round(sqrt(1/rowSums(1/sei^2,na.rm=T)), 4)
 
@@ -64,7 +66,7 @@ semeta = round(sqrt(1/rowSums(1/sei^2,na.rm=T)), 4)
 ## setup control
 control <- list(project_name = 'Medication use and fetal loss (ODAL)',
                 sites = c('MedicalCenter', 'Lincoln', 'Omaha', 'Kearney'),
-                lead_site = 'MedicalCenter', 
+                lead_site = 'Lincoln', 
                 step = 'initialize',
                 model = 'ODAL',
                 family = 'binomial',
@@ -90,15 +92,17 @@ pda(site_id = control$lead_site, control=control, dir=mydir)
 # [all sites]: initialize step, calculate individual estimates,   
 for(sid in site.name) pda(site_id = sid, ipdata = fetal_loss_split[[sid]], dir=mydir, 
                     upload_without_confirm =T, silent_message=T)
-
+# pda(site_id = control$lead_site, ipdata = fetal_loss_split[[control$lead_site]], dir=mydir, 
+#     upload_without_confirm =T, silent_message=T)
   
 # [all sites]: derive step, calculate derivatives, 
 for(sid in site.name) pda(site_id = sid, ipdata = fetal_loss_split[[sid]], dir=mydir, 
                     upload_without_confirm =T, silent_message=T)
- 
+# pda(site_id = control$lead_site, ipdata = fetal_loss_split[[control$lead_site]], dir=mydir, 
+#     upload_without_confirm =T, silent_message=T)
 
 # [lead site]: estimate step, calculate ODAL estimate, 
-pda(site_id = mysite, dir=mydir, ipdata = fetal_loss_split[[mysite]])
+pda(site_id = control$lead_site, dir=mydir, ipdata = fetal_loss_split[[control$lead_site]])
 ## END interactive section 
 
 
@@ -147,7 +151,7 @@ CI_plot_fetal_loss_ODAL <-
   facet_wrap(. ~ risk.factor
              , scales= "free"  #  "fixed" # 
              , ncol=3)+
-  labs(title= case, x =  '', y = "Effect size (log odds ratio)" ) +
+  labs(title= case, x =  '', y = "Effect estimate (log odds ratio)" ) +
   theme_bw() +
   theme(plot.title = element_text(hjust = 0.5)
         , axis.ticks.x = element_blank()

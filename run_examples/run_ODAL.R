@@ -9,33 +9,35 @@
 ## install packages
 require(data.table)
 require(table1) 
-require(ggplot2)
-require(remotes)
-install_github('https://github.com/Penncil/pda')
-require(pda)
+require(ggplot2) 
+
+source('https://github.com/Penncil/pda/raw/master/R/pda.R')
+source('https://github.com/Penncil/pda/raw/master/R/DLM.R')
+source('https://github.com/Penncil/pda/raw/master/R/dlmm.R')
+source('https://github.com/Penncil/pda/raw/master/R/ODAL.R')
 
 
-## local directory
-setwd('/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/run_examples/ota_cloud') # my working dir
+
+## local working directory
+setwd('/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/run_examples/ota_cloud') # CHANGE THIS TO YOUR DIR
 mydir = 'fetal_loss_ODAL'   # my project working dir 
 dir.create(mydir)           # create project working dir
-mysite = 'MedicalCenter'    # my site name 'MedicalCenter', 'Lincoln', 'Omaha', 'Kearney'
+mysite = 'MedicalCenter'    # CHANGE THIS TO YOUR SITE # 'MedicalCenter', 'Lincoln', 'Omaha', 'Kearney'
 
-## read in my csv data 
-# url_mydata = paste0('https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/fetal_loss_', mysite, '.rds') # github repo
-# COVID_LOS_mydata = readRDS(gzcon(url(url_mydata)))    # read in my data from github repo
+## read in RDS data file 
+url_mydata = paste0('https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/fetal_loss_', mysite, '.rds') # github repo
+fetal_loss_mydata = readRDS(gzcon(url(url_mydata)))    # read in my data from github repo
 
-url_mydata = paste0('https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/fetal_loss_', mysite, '.csv') # github repo
-fetal_loss_mydata = fread( url_mydata )
-fetal_loss_mydata[,Race:=factor(Race, levels = c('White', 'Black', 'Asian', 'Other'))]
 ########################### END: Setup ##############################
 
 
 
 ############################ Data summary ###########################
 ## descriptive
-head(fetal_loss_mydata)   
+fetal_loss_mydata   
 table1(~factor(FetalLoss)+factor(MedX)+Race+Age+Weight+BMI|site, fetal_loss_mydata)
+
+
 site.name = c('MedicalCenter', 'Lincoln', 'Omaha', 'Kearney')
 K = length(site.name)
 
@@ -43,7 +45,7 @@ K = length(site.name)
 fit.i = glm(FetalLoss~MedX+Race+Age+Weight+BMI, family='binomial', data=fetal_loss_mydata)
 round(summary(fit.i)$coef, 3)
 
-## Discussion...
+## Whiteboard Discussion...
 ######################### END: Data summary ###########################
 
  
@@ -80,13 +82,13 @@ pda(site_id = mysite, ipdata = fetal_loss_mydata, dir=mydir)
 # and upload *_initialize.json to pda-ota
 
 # [lead site]: update control file, 
-# download *_initialize.json files, calculate ODAL initial estimates,   
+# download *_initialize.json files, calculate initial estimates for ODAL,   
 pda(site_id = control$lead_site, ipdata = fetal_loss_mydata, dir=mydir)
 # and upload control.json to pda-ota 
 
 # [all sites]: derive step,  
 # download the control file, calculate derivatives,  
-pda(site_id = mysite, ipdata = OUD_mydata, dir=mydir)
+pda(site_id = mysite, ipdata = fetal_loss_mydata, dir=mydir)
 # and upload *_derive.json to pda-ota
 
 # [lead site]: estimate step, calculate ODAL estimate, 
@@ -111,9 +113,9 @@ fit.odal
 
 ########################## Logistic reg Pooled data ############################
 ## read in pooled data 
-url_mydata = 'https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/fetal_loss.csv' # github repo
-fetal_loss = fread(url_mydata)
-fetal_loss[,Race:=factor(Race, levels = c('White', 'Black', 'Asian', 'Other'))]
+url_mydata = 'https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/fetal_loss.rds' # github repo
+fetal_loss = readRDS(gzcon(url(url_mydata)))    # read in my data from github repo
+
 
 ## Logistic regression using pooled data 
 fit.pooled = glm(FetalLoss~MedX+Race+Age+Weight+BMI, family='binomial', data=fetal_loss)
@@ -122,7 +124,7 @@ bpool = round(summary(fit.pooled)$coef[,1], 4)
 sepool = round(summary(fit.pooled)$coef[,2], 4)
 
 
-## Logistic regression at each site, then average them with inverse-variance as weights. This is called "meta-estimator" 
+## Logistic regression at each site,  
 bi = sei = c()  
 for(sid in site.name){
   fit.i = glm(FetalLoss~MedX+Race+Age+Weight+BMI, family='binomial', data=fetal_loss[site==sid,])
@@ -134,6 +136,9 @@ for(sid in site.name){
 # site "Kearney" has no coef for Asian, let's manually correct it (fill it with NA)
 bi[,4] = c(bi[1:3,4],NA,bi[4:7,4]) 
 sei[,4] = c(sei[1:3,4],NA,sei[4:7,4]) 
+
+## Average them with inverse-variance as weights. 
+## This is called "meta-estimator", we may also use this as a convenient federated analysis 
 bmeta = round(rowSums(bi/sei^2,na.rm=T)/rowSums(1/sei^2,na.rm=T), 4)
 semeta = round(sqrt(1/rowSums(1/sei^2,na.rm=T)), 4)
  
@@ -162,7 +167,7 @@ ggplot(ci.df, aes(x=method, y=beta, shape=method,color=method, group=risk.factor
   facet_wrap(. ~ risk.factor
              , scales= "free"  #  "fixed" # 
              , ncol=3)+
-  labs(title= case, x =  '', y = "Effect size (log odds ratio)" ) +
+  labs(title= case, x =  '', y = "Effect estimate (log odds ratio)" ) +
   theme_bw() +
   theme(plot.title = element_text(hjust = 0.5)
         , axis.ticks.x = element_blank()

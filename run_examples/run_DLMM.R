@@ -13,43 +13,48 @@ require(data.table)
 require(table1) 
 require(ggplot2)
 require(lme4)
-require(remotes)
-install_github('https://github.com/Penncil/pda')
-require(pda)
+
+source('https://github.com/Penncil/pda/raw/master/R/pda.R')
+source('https://github.com/Penncil/pda/raw/master/R/DLM.R')
+source('https://github.com/Penncil/pda/raw/master/R/dlmm.R')
+source('https://github.com/Penncil/pda/raw/master/R/ODAL.R')
 
 
-## local directory
-setwd('/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/run_examples/ota_cloud') # my working dir
+## local working directory
+setwd('/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/run_examples/ota_cloud') # CHANGE THIS TO YOUR DIR
 mydir = 'COVID_LOS_DLMM'      # my project working dir 
 dir.create(mydir)             # create project working dir
-mysite = 'Kearney'            # my site name 'MedicalCenter', 'Lincoln', 'Omaha', 'Kearney'
+mysite = 'MedicalCenter'            # CHANGE THIS TO YOUR SITE # 'MedicalCenter', 'Lincoln', 'Omaha', 'Kearney'
 
-## read in my csv data 
-# url_mydata = paste0('https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/COVID_LOS_', mysite, '.rds') # github repo
-# COVID_LOS_mydata = readRDS(gzcon(url(url_mydata)))    # read in my data from github repo
+site.name = c('MedicalCenter', 'Lincoln', 'Omaha', 'Kearney')
+K = length(site.name)
 
-url_mydata = paste0('https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/COVID_LOS_', mysite, '.csv') # github repo
-COVID_LOS_mydata = fread( url_mydata )
 
+## read in RDS data 
+url_mydata = paste0('https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/COVID_LOS_', mysite, '.rds') # github repo
+COVID_LOS_mydata = readRDS(gzcon(url(url_mydata)))    # read in my data from github repo
+ 
 ########################### END: Setup ##############################
+
 
 ############################ Data summary ###########################
 ## descriptive
-head(COVID_LOS_mydata)   
+COVID_LOS_mydata   
 table1(~LOS+Age+CCI+Gender+Admission+factor(Cancer)+factor(COPD)+factor(Hyperlipidemia)+factor(Hypertension)+
-         factor(KidneyDisease)+factor(Obesity)+factor(HeartDisease)+factor(Diabetes), data=COVID_LOS_mydata)
+         factor(KidneyDisease)+factor(Obesity)+factor(HeartDisease)+factor(Diabetes)|site, data=COVID_LOS_mydata)
+
 
 ## let's fit a linear regression model using my data
 fit.i = lm(LOS ~ Age + CCI + Gender + Admission + Cancer + COPD + Hyperlipidemia + Hypertension +
              KidneyDisease + Obesity + HeartDisease + Diabetes, data = COVID_LOS_mydata)
 round(summary(fit.i)$coef, 3)
 
-## Discussion...
+## Whiteboard Discussion...
 ######################### END: Data summary ###########################
+
 
 ####################### DLMM workflow ##################################
 ## setup control
-site.name = c('MedicalCenter', 'Lincoln', 'Omaha', 'Kearney')
 control <- list(project_name = 'COVID hospitalization length of stay (DLMM)',
                 sites = c('MedicalCenter', 'Lincoln', 'Omaha', 'Kearney'),
                 lead_site = 'MedicalCenter', 
@@ -67,22 +72,27 @@ control <- list(project_name = 'COVID hospitalization length of stay (DLMM)',
                 optim_maxit = 100,
                 upload_date = as.character(Sys.time()) )
 
+
 ## DLMM interactive section: use pda-ota for data communication
 # [all sites]: remove any json files if exist
 file.remove(list.files(mydir,full.names = T)[grepl('.json', list.files(mydir))])
-K = length(control$sites)
+
 
 # [lead site]: create control.json, 
 pda(site_id = control$lead_site, control=control, dir=mydir)
 # and upload it to pda-ota 
 
+
 # [all sites]: download the control file, calculate AD,  
 pda(site_id = mysite, ipdata = COVID_LOS_mydata, dir=mydir)
 # and upload it to pda-ota
 
-# [any site]: download AD files (_initialize.json), fit DLMM  
+
+# [lead site]: download AD files (*_initialize.json), fit DLMM  
 pda(site_id = mysite, dir=mydir, ipdata = COVID_LOS_mydata)
 ## END DLMM interactive section 
+
+
 
 
 ## OK pda-DLMM is completed now, let's check the results
@@ -140,12 +150,33 @@ url_mydata = 'https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/COVI
 COVID_LOS = readRDS(gzcon(url(url_mydata)))     
 
 
+## let's fit a linear regression model at each site
+bi = sei = c()  
+for(sid in site.name){
+  fit.i = lm(LOS~Age+CCI+Gender+Admission+Cancer+COPD+Hyperlipidemia+Hypertension+
+               KidneyDisease + Obesity + HeartDisease + Diabetes, data=COVID_LOS[site==sid,])
+  cat(sid, '\n')
+  print(round(summary(fit.i)$coef, 3))
+  bi = cbind(bi, summary(fit.i)$coef[,1])
+  sei = cbind(sei, summary(fit.i)$coef[,2])
+}
+# site "Kearney" has no Q1, let's manually correct it (fill it with NA)
+bi[,4] = c(bi[1:6,4],NA,bi[7:15,4]) 
+sei[,4] = c(sei[1:6,4],NA,sei[7:15,4])
+
+## Average them with inverse-variance as weights. 
+## This is called "meta-estimator", we may also use this as a convenient federated analysis
+bmeta = round(rowSums(bi/sei^2,na.rm=T)/rowSums(1/sei^2,na.rm=T), 4)
+semeta = round(sqrt(1/rowSums(1/sei^2,na.rm=T)), 4)
+
+
 ## LMM, random intercepts
 fit.pooled <- lme4::lmer(LOS~Age+CCI+Gender+Admission+Cancer+COPD+Hyperlipidemia+Hypertension+
                            KidneyDisease + Obesity + HeartDisease + Diabetes +
                            (1|site), REML = F, data=COVID_LOS)
 b_pool = round(summary(fit.pooled)$coef[,1], 4)
 se_pool = round(summary(fit.pooled)$coef[,2], 4)
+
 
 # fixed effects
 data.frame(risk_factor=fit.dlmm$risk_factor, b_pool=b_pool, b_meta=bmeta, b_dlmm=fit.dlmm$bhat)
@@ -162,32 +193,80 @@ data.frame(site = control$sites,
 
 
 
-## LMM, random intercepts and Gender effects
-COVID_LOS[,Gender:=ifelse(Gender=='F',0,1)] # create dummy var 
-fit.pooled1 <- lme4::lmer(LOS~Age+CCI+Gender+Admission+Cancer+COPD+Hyperlipidemia+Hypertension+
-                            KidneyDisease + Obesity + HeartDisease + Diabetes +
-                            (1|site)+(0+Gender|site), REML = F, data=COVID_LOS)
-# compare p-value:
-# Chi-sq test for Gender random effect (likelihood ratio test, LRT)
-anova(fit.pooled, fit.pooled1) 
-# Chi-sq test for Gender random effect, via DLMM 
-1 - pchisq((fit.dlmm1$lik - fit.dlmm$lik)*2, df=1) # p-value
+## make CI plots: compare pooled vs meta vs DLMM
+Xname = names(b_pool)
+px = length(Xname)
+methods <- c('pooled', 'meta', 'DLMM')   
+nm <- length(methods)
+ci.df <- data.frame(method = rep(methods, each=px),       
+                    risk.factor= rep(Xname, nm),
+                    beta=as.numeric(c(b_pool, bmeta, fit.dlmm$bhat)),  
+                    sd=as.numeric(c(se_pool, semeta, fit.dlmm$sebhat)),          
+                    goldstandard=as.numeric(rep(b_pool, nm)))
+ci.df$method <- factor(ci.df$method, levels = rev(methods)) 
+ci.df$risk.factor <- factor(ci.df$risk.factor, levels = Xname)  
+case = 'COVID LOS study'
 
-# fixed effects
-b_pool1 = round(summary(fit.pooled1)$coef[,1], 4)
-se_pool1 = round(summary(fit.pooled1)$coef[,2], 4)
-data.frame(risk_factor=fit.dlmm1$risk_factor, b_pool=b_pool1, b_meta=bmeta, b_dlmm=fit.dlmm1$bhat)
+CI_plot_COVID_LOS_DLMM <- 
+  ggplot(ci.df, aes(x=method, y=beta, shape=method,color=method, group=risk.factor)) +
+  geom_errorbar(aes(ymin=beta-1.96*sd, ymax=beta+1.96*sd), width=0.1) +
+  geom_line() +
+  geom_hline(aes(yintercept=goldstandard), linetype = "dashed") +
+  geom_point(size=1.5) + 
+  facet_wrap(. ~ risk.factor
+             , scales= "free"  #  "fixed" # 
+             , ncol=5)+
+  labs(title= case, x =  '', y = "Effect estimate" ) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5)
+        , axis.ticks.x = element_blank()
+        , strip.text.x = element_text(size = 14)
+        , panel.grid.major = element_blank() 
+        , axis.title.y = element_text(size=9)
+        , axis.text.x = element_text(size=9)
+        , axis.text.y = element_text(size=9) 
+        , legend.position = c(0.7, 0.13)
+        , legend.title = element_blank() 
+        , legend.text=element_text(size=15) 
+        , legend.key.height = unit(1.5, "line")
+  ) + coord_flip()
 
-# var component (of random intercepts and Gender effects)
-data.frame(RandomEffect=c(fit.dlmm1$risk_factor_heterogeneity,  'random error'),
-           VarComp.dlmm=data.frame(summary(fit.pooled1)$varcor)$vcov, 
-           VarComp.pool=c(diag(fit.dlmm1$Vhat), fit.dlmm1$sigmahat^2) )
+ggsave("CI_plot_COVID_LOS_DLMM.pdf",  plot = CI_plot_COVID_LOS_DLMM, width =12, height =8)
 
-# random intercepts and Gender effects (BLUP)
-data.frame(site = control$sites, 
-           BLUP.pool.Intercept = round(ranef(fit.pooled1)$site$`(Intercept)`, 4),
-           BLUP.dlmm.Intercept = fit.dlmm1$uhat[,1], 
-           BLUP.pool.GenderM = round(ranef(fit.pooled1)$site$Gender, 4),
-           BLUP.dlmm.GenderM = fit.dlmm1$uhat[,2])
+
+
+
+
+
+
+
+
+# ## LMM, random intercepts and Gender effects
+# COVID_LOS[,Gender:=ifelse(Gender=='F',0,1)] # create dummy var 
+# fit.pooled1 <- lme4::lmer(LOS~Age+CCI+Gender+Admission+Cancer+COPD+Hyperlipidemia+Hypertension+
+#                             KidneyDisease + Obesity + HeartDisease + Diabetes +
+#                             (1|site)+(0+Gender|site), REML = F, data=COVID_LOS)
+# # compare p-value:
+# # Chi-sq test for Gender random effect (likelihood ratio test, LRT)
+# anova(fit.pooled, fit.pooled1) 
+# # Chi-sq test for Gender random effect, via DLMM 
+# 1 - pchisq((fit.dlmm1$lik - fit.dlmm$lik)*2, df=1) # p-value
+# 
+# # fixed effects
+# b_pool1 = round(summary(fit.pooled1)$coef[,1], 4)
+# se_pool1 = round(summary(fit.pooled1)$coef[,2], 4)
+# data.frame(risk_factor=fit.dlmm1$risk_factor, b_pool=b_pool1, b_meta=bmeta, b_dlmm=fit.dlmm1$bhat)
+# 
+# # var component (of random intercepts and Gender effects)
+# data.frame(RandomEffect=c(fit.dlmm1$risk_factor_heterogeneity,  'random error'),
+#            VarComp.dlmm=data.frame(summary(fit.pooled1)$varcor)$vcov, 
+#            VarComp.pool=c(diag(fit.dlmm1$Vhat), fit.dlmm1$sigmahat^2) )
+# 
+# # random intercepts and Gender effects (BLUP)
+# data.frame(site = control$sites, 
+#            BLUP.pool.Intercept = round(ranef(fit.pooled1)$site$`(Intercept)`, 4),
+#            BLUP.dlmm.Intercept = fit.dlmm1$uhat[,1], 
+#            BLUP.pool.GenderM = round(ranef(fit.pooled1)$site$Gender, 4),
+#            BLUP.dlmm.GenderM = fit.dlmm1$uhat[,2])
 
 ####################### END: LMM Pooled data ############################
