@@ -1,7 +1,7 @@
-UNMC workshop: Federa PDA-OTA practice software setup
+UNMC workshop: Federated Learning Using PDA 
 ==============================================
    
-  
+# Afternoon session PDA-OTA practice software setup
 1. Install R (v4.4.3 or later) and Rstudio:
   - https://posit.co/download/rstudio-desktop/
   
