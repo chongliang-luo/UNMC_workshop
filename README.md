@@ -1,4 +1,4 @@
-UNMC workshop: PDA-OTA practice software setup
+UNMC workshop: Federa PDA-OTA practice software setup
 ==============================================
    
   
@@ -7,7 +7,10 @@ UNMC workshop: PDA-OTA practice software setup
   
 2. Install R packages in Rstudio using the script:
 ```r
-install.packages(c('data.table', 'table1', 'lme4', 'ggplot2')) 
+install.packages(c('data.table', 'table1', 'lme4', 'ggplot2', 'jsonlite', 'minqa', 'numDeriv')) 
+require(jsonlite)
+require(minqa)
+require(numDeriv)
 require(data.table)
 require(table1) 
 require(lme4)

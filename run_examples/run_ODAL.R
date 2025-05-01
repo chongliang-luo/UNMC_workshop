@@ -6,23 +6,38 @@
 ############################## Setup ##############################
 # rm(list=ls()) # empty R， remove all objects
 
-## install packages
+## install packages 
+install.packages(c('data.table', 'table1', 'lme4', 'ggplot2', 'jsonlite', 'minqa', 'numDeriv')) 
 require(data.table)
 require(table1) 
-require(ggplot2) 
+require(lme4)
+require(ggplot2)
+require(jsonlite)
+require(minqa)
+require(numDeriv)
 
+
+## let's directly source pda functions from Github, please don't try to install from CRAN or Github
 source('https://github.com/Penncil/pda/raw/master/R/pda.R')
 source('https://github.com/Penncil/pda/raw/master/R/DLM.R')
 source('https://github.com/Penncil/pda/raw/master/R/dlmm.R')
 source('https://github.com/Penncil/pda/raw/master/R/ODAL.R')
 
 
-
 ## local working directory
-setwd('/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/run_examples/ota_cloud') # CHANGE THIS TO YOUR DIR
-mydir = 'fetal_loss_ODAL'   # my project working dir 
-dir.create(mydir)           # create project working dir
-mysite = 'MedicalCenter'    # CHANGE THIS TO YOUR SITE # 'MedicalCenter', 'Lincoln', 'Omaha', 'Kearney'
+# ***CHANGE THIS TO YOUR DIR***
+setwd('/Users/chongliang/Dropbox/PDA-git/UNMC_workshop/run_examples/ota_cloud') 
+# ***CHANGE THIS TO YOUR SITE***
+mysite = 'MedicalCenter'      # 'MedicalCenter', 'Lincoln', 'Omaha', 'Kearney'
+
+
+
+mydir = 'fetal_loss_ODAL'       # my project working dir 
+dir.create(mydir)               # create project working dir
+site.name = c('MedicalCenter', 'Lincoln', 'Omaha', 'Kearney')
+K = length(site.name)
+
+
 
 ## read in RDS data file 
 url_mydata = paste0('https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/fetal_loss_', mysite, '.rds') # github repo
@@ -37,18 +52,25 @@ fetal_loss_mydata = readRDS(gzcon(url(url_mydata)))    # read in my data from gi
 fetal_loss_mydata   
 table1(~factor(FetalLoss)+factor(MedX)+Race+Age+Weight+BMI|site, fetal_loss_mydata)
 
+## Whiteboard Discussion...
 
-site.name = c('MedicalCenter', 'Lincoln', 'Omaha', 'Kearney')
-K = length(site.name)
+
 
 ## let's fit a logistic regression model using my data
 fit.i = glm(FetalLoss~MedX+Race+Age+Weight+BMI, family='binomial', data=fetal_loss_mydata)
 round(summary(fit.i)$coef, 3)
 
 ## Whiteboard Discussion...
+
 ######################### END: Data summary ###########################
 
  
+
+
+
+
+
+
 ####################### ODAL workflow ##################################
 ## setup control
 control <- list(project_name = 'Medication use and fetal loss (ODAL)',
@@ -66,37 +88,55 @@ control <- list(project_name = 'Medication use and fetal loss (ODAL)',
                 optim_method = 'BFGS',
                 upload_date = as.character(Sys.time()) )
  
-## ODAL interactive section: use pda-ota for data communication
-# [all sites]: remove any json files if exist
+## PDA-OTA interactive section: use pda-ota for data communication
+# STEP 0 [ALL sites]: remove any json files if exist
 file.remove(list.files(mydir,full.names = T)[grepl('.json', list.files(mydir))])
  
 
-# [lead site]: create control file, 
+
+# STEP 1 [LEAD site only]: create control.json, read the R output
 pda(site_id = control$lead_site, control=control, dir=mydir)
 # and upload control.json to pda-ota 
 
 
-# [all sites]: initialize step, 
-# download the control file, calculate individual estimates,   
+
+# Step 2 [ALL sites]: download control.json to your working dir (/fetal_loss_ODAL), 
+# calculate AD (individual estimates), read the R output    
 pda(site_id = mysite, ipdata = fetal_loss_mydata, dir=mydir)
 # and upload *_initialize.json to pda-ota
 
-# [lead site]: update control file, 
-# download *_initialize.json files, calculate initial estimates for ODAL,   
+
+
+# STEP 3 [LEAD site only]: download AD files (*_initialize.json) to your working dir,
+# calculate initial estimates for ODAL, and update control file, 
 pda(site_id = control$lead_site, ipdata = fetal_loss_mydata, dir=mydir)
 # and upload control.json to pda-ota 
 
-# [all sites]: derive step,  
-# download the control file, calculate derivatives,  
+
+
+# STEP 4 [ALL sites]: download control.json to your working dir (/fetal_loss_ODAL),
+# calculate AD (likelihood derivatives), read the R output   
 pda(site_id = mysite, ipdata = fetal_loss_mydata, dir=mydir)
 # and upload *_derive.json to pda-ota
 
-# [lead site]: estimate step, calculate ODAL estimate, 
-pda(site_id = mysite, dir=mydir, ipdata = fetal_loss_mydata)
-# and upload *_estimate.json to pda-ota
-## END interactive section 
 
 
+# STEP 5 [LEAD site only]: download AD files (*_derive.json) to your working dir,
+# calculate ODAL estimate, read the R output  
+pda(site_id = control$lead_site, ipdata = fetal_loss_mydata, dir=mydir)
+# close the project and upload the final result *_estimate.json 
+
+
+
+# (STEP 6) [ALL sites]: download the *_estimate.json to run the scripts below
+
+## END PDA-OTA interactive section 
+
+##################### END: ODAL workflow #################################
+
+ 
+
+###########################    Conclusion    #############################
 
 ## OK pda-ODAL is completed now, let's check the results
 # read in the ODAL results
@@ -104,28 +144,25 @@ config <- getCloudConfig(site_id=mysite, dir=mydir)
 fit.odal <- pdaGet(name = paste0(control$lead_site,'_estimate'), config = config)
 fit.odal
 
-##################### END: ODAL workflow #################################
-
-
-
-
-
-
-########################## Logistic reg Pooled data ############################
-## read in pooled data 
+## Let's also compare ODAL with other methods...
+## first let's read in the pooled data
 url_mydata = 'https://github.com/chongliang-luo/UNMC_workshop/raw/main/data/fetal_loss.rds' # github repo
 fetal_loss = readRDS(gzcon(url(url_mydata)))    # read in my data from github repo
 
 
-## Logistic regression using pooled data 
+## Let's fit Logistic regression using pooled data 
 fit.pooled = glm(FetalLoss~MedX+Race+Age+Weight+BMI, family='binomial', data=fetal_loss)
 round(summary(fit.pooled)$coef, 3)
 bpool = round(summary(fit.pooled)$coef[,1], 4)
 sepool = round(summary(fit.pooled)$coef[,2], 4)
 
 
-## Logistic regression at each site,  
-bi = sei = c()  
+
+
+## Let's try another naive federated analysis method: 
+# By averaging individual estimates, this is called "meta-estimator" 
+# first fit a logistic regression model at each site
+bi = sei = c()      # regression coefficients, and their standard errors
 for(sid in site.name){
   fit.i = glm(FetalLoss~MedX+Race+Age+Weight+BMI, family='binomial', data=fetal_loss[site==sid,])
   cat(sid,'\n')
@@ -133,18 +170,19 @@ for(sid in site.name){
   bi = cbind(bi, summary(fit.i)$coef[,1])
   sei = cbind(sei, summary(fit.i)$coef[,2])
 }
+
 # site "Kearney" has no coef for Asian, let's manually correct it (fill it with NA)
 bi[,4] = c(bi[1:3,4],NA,bi[4:7,4]) 
 sei[,4] = c(sei[1:3,4],NA,sei[4:7,4]) 
 
-## Average them with inverse-variance as weights. 
-## This is called "meta-estimator", we may also use this as a convenient federated analysis 
+## "meta-estimator" (inverse-variance weighted average), 
 bmeta = round(rowSums(bi/sei^2,na.rm=T)/rowSums(1/sei^2,na.rm=T), 4)
 semeta = round(sqrt(1/rowSums(1/sei^2,na.rm=T)), 4)
  
 
 
-## make CI plots: compare pooled vs meta vs ODAL
+## Let's compare pooled vs meta vs DLMM, 
+## with confidence interval (CI) plots of the effect estimates: 
 Xname = c("MedX", "RaceBlack", 'RaceAsian', 'RaceOther', "Age", "Weight", "BMI")
 px = length(Xname)
 methods <- c('pooled', 'meta', 'ODAL')   
@@ -175,17 +213,22 @@ ggplot(ci.df, aes(x=method, y=beta, shape=method,color=method, group=risk.factor
         , panel.grid.major = element_blank() 
         , axis.title.y = element_text(size=9)
         , axis.text.x = element_text(size=9)
-        , axis.text.y = element_text(size=9) 
-        , legend.position = c(0.7, 0.13)
+        , axis.text.y = element_text(size=9)
+        , legend.position = "inside",
+        , legend.position.inside = c(0.7, 0.13) 
         , legend.title = element_blank() 
         , legend.text=element_text(size=15) 
         , legend.key.height = unit(1.5, "line")
   ) + coord_flip()
 
+CI_plot_fetal_loss_ODAL
+
+## save this plot as pdf file
 ggsave("CI_plot_fetal_loss_ODAL.pdf",  plot = CI_plot_fetal_loss_ODAL, width =10, height =8)
        
- 
-####################### END: Logistic reg Pooled data ##########################
+## Lead site can upload this plot to OTA 
+
+########################    END: Conclusion    ###########################
 
 
 
